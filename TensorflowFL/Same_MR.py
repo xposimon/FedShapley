@@ -224,21 +224,19 @@ def getParmsAndLearningRate(agent_no):
     return ret
 
 
-def train_with_gradient_and_valuation(agent_list, grad, bi, lr, distr_type, iter_n, g_m):
+def train_with_gradient_and_valuation(agent_list, grad, bi, lr, distr_type, iter_n, g_m, agent_shapley):
     model_g = {
         'weights': g_m[0],
         'bias': g_m[1]
     }
 
-    for i in range(iter_n-1, iter_n):
-        # i->迭代轮数
-        gradient_w = np.zeros([784, 10], dtype=np.float32)
-        gradient_b = np.zeros([10], dtype=np.float32)
-        for j in agent_list:
-            gradient_w = np.add(np.multiply(grad[j][i], 1 / len(agent_list)), gradient_w)
-            gradient_b = np.add(np.multiply(bi[j][i], 1 / len(agent_list)), gradient_b)
-        model_g['weights'] = np.subtract(model_g['weights'], np.multiply(lr[0][i], gradient_w))
-        model_g['bias'] = np.subtract(model_g['bias'], np.multiply(lr[0][i], gradient_b))
+    gradient_w = np.zeros([784, 10], dtype=np.float32)
+    gradient_b = np.zeros([10], dtype=np.float32)
+    for j in agent_list:
+        gradient_w = np.add(np.multiply(grad[j], agent_shapley[local_model_index]/np.sum(agent_shapley)), gradient_w)
+        gradient_b = np.add(np.multiply(bi[j], agent_shapley[local_model_index]/np.sum(agent_shapley)), gradient_b)
+    model_g['weights'] = np.subtract(model_g['weights'], np.multiply(lr, gradient_w))
+    model_g['bias'] = np.subtract(model_g['bias'], np.multiply(lr, gradient_b))
 
     test_images = readTestImagesFromFile(False)
     test_labels_onehot = readTestLabelsFromFile(False)
@@ -320,13 +318,13 @@ if __name__ == "__main__":
     start_time = time.time()
     # data_num = np.asarray([5923, 6742, 5958, 6131, 5842])
     # agents_weights = np.divide(data_num, data_num.sum())
-    for index in range(NUM_AGENT):
-        f = open(os.path.join(os.path.dirname(__file__), "weights_" + str(index) + ".txt"), "w")
-        f.close()
-        f = open(os.path.join(os.path.dirname(__file__), "bias_" + str(index) + ".txt"), "w")
-        f.close()
-    f = open(os.path.join(os.path.dirname(__file__), "gradientplus_models.txt"), "w")
-    f.close()
+    # for index in range(NUM_AGENT):
+    #     f = open(os.path.join(os.path.dirname(__file__), "weights_" + str(index) + ".txt"), "w")
+    #     f.close()
+    #     f = open(os.path.join(os.path.dirname(__file__), "bias_" + str(index) + ".txt"), "w")
+    #     f.close()
+    # f = open(os.path.join(os.path.dirname(__file__), "gradientplus_models.txt"), "w")
+    # f.close()
     mnist_train, mnist_test = tf.keras.datasets.mnist.load_data()
 
     DISTRIBUTION_TYPE = "SAME"
@@ -352,36 +350,57 @@ if __name__ == "__main__":
         'bias': b_initial
     }
     model = initial_model
+    all_sets = PowerSetsBinary([i for i in range(NUM_AGENT)])
     learning_rate = 0.1
+    pre_weights = []
+    pre_bias = []
+    
+    m_w = np.zeros([784, 10], dtype=np.float32)
+    m_b = np.zeros([10], dtype=np.float32)
+
     for round_num in range(50):
         local_models = federated_train(model, learning_rate, federated_train_data)
         print("learning rate: ", learning_rate)
         # print(local_models[0][0])#第0个agent的weights矩阵
         # print(local_models[0][1])#第0个agent的bias矩阵
-        for local_index in range(len(local_models)):
-            f = open(os.path.join(os.path.dirname(__file__), "weights_" + str(local_index) + ".txt"), "a", encoding="utf-8")
-            for i in local_models[local_index][0]:
-                line = ""
-                arr = list(i)
-                for j in arr:
-                    line += (str(j) + "\t")
-                print(line, file=f)
-            print("***" + str(learning_rate) + "***", file=f)
-            print("-" * 50, file=f)
-            f.close()
-            f = open(os.path.join(os.path.dirname(__file__), "bias_" + str(local_index) + ".txt"), "a", encoding="utf-8")
-            line = ""
-            for i in local_models[local_index][1]:
-                line += (str(i) + "\t")
-            print(line, file=f)
-            print("***" + str(learning_rate) + "***", file=f)
-            print("-" * 50, file=f)
-            f.close()
-        m_w = np.zeros([784, 10], dtype=np.float32)
-        m_b = np.zeros([10], dtype=np.float32)
+        
+        group_shapley_value = []
+        agent_shapley = []
+        if round_num == 0:
+            agent_shapley = [1/NUM_AGENT] * NUM_AGENT
+            pre_weights = np.array([local_models[local_model_index][0] for local_model_index in range(len(local_models))])
+            pre_bias = np.array([local_models[local_model_index][1] for local_model_index in range(len(local_models))])
+        else:
+            gradient_weight = []
+            gradient_bias = []
+
+            for k in range(NUM_AGENT):
+                gradient_weight.append(np.divide(np.subtract(pre_weights[k], local_models[k][0]), learning_rate))
+                gradient_bias.append(np.divide(np.subtract(pre_bias[k], local_models[k][1]), learning_rate))
+            
+            pre_weights = np.array([local_models[local_model_index][0] for local_model_index in range(len(local_models))])
+            pre_bias = np.array([local_models[local_model_index][1] for local_model_index in range(len(local_models))])
+
+            for s in all_sets:
+                group_shapley_value.append(
+                    train_with_gradient_and_valuation(s, gradient_weight, gradient_bias, learning_rate, DISTRIBUTION_TYPE,
+                                                    round_num, [m_w, m_b], agent_shapley))
+                print(str(s) + "\t" + str(group_shapley_value[len(group_shapley_value) - 1]))
+            
+            for index in range(NUM_AGENT):
+                shapley = 0.0
+                for j in all_sets:
+                    if index in j:
+                        remove_list_index = remove_list_indexed(index, j, all_sets)
+                        if remove_list_index != -1:
+                            shapley += (group_shapley_value[shapley_list_indexed(j, all_sets)] - group_shapley_value[
+                                remove_list_index]) / (comb(NUM_AGENT - 1, len(all_sets[remove_list_index])))
+                agent_shapley.append(shapley)
+            print(agent_shapley)
+
         for local_model_index in range(len(local_models)):
-            m_w = np.add(np.multiply(local_models[local_model_index][0], 1 / NUM_AGENT), m_w)
-            m_b = np.add(np.multiply(local_models[local_model_index][1], 1 / NUM_AGENT), m_b)
+            m_w = np.add(np.multiply(local_models[local_model_index][0], 1 / NUM_AGENT, m_w))
+            m_b = np.add(np.multiply(local_models[local_model_index][1], 1 / NUM_AGENT, m_b))
             model = {
                 'weights': m_w,
                 'bias': m_b
@@ -398,59 +417,5 @@ if __name__ == "__main__":
         loss = federated_eval(model, federated_train_data)
         print('round {}, loss={}'.format(round_num, loss))
         print(time.time() - start_time)
-
-    gradient_weights = []
-    gradient_biases = []
-    gradient_lrs = []
-    for ij in range(NUM_AGENT):
-        model_ = getParmsAndLearningRate(ij)
-        gradient_weights_local = []
-        gradient_biases_local = []
-        learning_rate_local = []
-
-        for i in range(len(model_['learning_rate'])):
-            if i == 0:
-                gradient_weight = np.divide(np.subtract(initial_model['weights'], model_['weights'][i]),
-                                            model_['learning_rate'][i])
-                gradient_bias = np.divide(np.subtract(initial_model['bias'], model_['bias'][i]),
-                                          model_['learning_rate'][i])
-            else:
-                gradient_weight = np.divide(np.subtract(model_['weights'][i - 1], model_['weights'][i]),
-                                            model_['learning_rate'][i])
-                gradient_bias = np.divide(np.subtract(model_['bias'][i - 1], model_['bias'][i]),
-                                          model_['learning_rate'][i])
-            gradient_weights_local.append(gradient_weight)
-            gradient_biases_local.append(gradient_bias)
-            learning_rate_local.append(model_['learning_rate'][i])
-
-        gradient_weights.append(gradient_weights_local)
-        gradient_biases.append(gradient_biases_local)
-        gradient_lrs.append(learning_rate_local)
-
-    all_sets = PowerSetsBinary([i for i in range(NUM_AGENT)])
-
-    models_hository = loadHistoryModels()
-    agent_shapley_history = []
-    for iter_num in range(1, len(gradient_weights[0]) + 1):
-        group_shapley_value = []
-        for s in all_sets:
-            group_shapley_value.append(
-                train_with_gradient_and_valuation(s, gradient_weights, gradient_biases, gradient_lrs, DISTRIBUTION_TYPE,
-                                                  iter_num, models_hository[iter_num-1]))
-            print(str(s) + "\t" + str(group_shapley_value[len(group_shapley_value) - 1]))
-
-        agent_shapley = []
-        for index in range(NUM_AGENT):
-            shapley = 0.0
-            for j in all_sets:
-                if index in j:
-                    remove_list_index = remove_list_indexed(index, j, all_sets)
-                    if remove_list_index != -1:
-                        shapley += (group_shapley_value[shapley_list_indexed(j, all_sets)] - group_shapley_value[
-                            remove_list_index]) / (comb(NUM_AGENT - 1, len(all_sets[remove_list_index])))
-            agent_shapley.append(shapley)
-        print( agent_shapley)
-        agent_shapley_history.append(agent_shapley)
-
-
+   
     print("end_time", time.time() - start_time)
