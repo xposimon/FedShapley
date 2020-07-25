@@ -38,9 +38,10 @@ def get_data_for_digit_test(source, digit):
     return output_sequence
 
 def get_data_for_federated_agents(source, num):
-    # add weights 2:3:4:5:6
-    PIECE = int(5421/20)
-    left=int((num+2)*(num+1)/2)-1
+    # add weights 1:2:3:4:5
+    PIECE = int(5421/15)
+    left=int((num+1)*(num)/2)
+    print((left,left+num+1))
     output_sequence = []
     Samples = []
 
@@ -51,7 +52,9 @@ def get_data_for_federated_agents(source, num):
 
     all_samples = []
     for sample in Samples:
-        for sample_index in range(left*PIECE,(left+num+2)*PIECE):
+        for sample_index in range(left*PIECE,(left+num+1)*PIECE):
+            if sample_index >= len(sample):
+                break
             all_samples.append(sample[sample_index])
 
     # all_samples = [i for i in range(int(num*(len(source[1])/NUM_AGENT)), int((num+1)*(len(source[1])/NUM_AGENT)))]
