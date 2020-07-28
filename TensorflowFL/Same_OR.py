@@ -4,6 +4,7 @@ import tensorflow.compat.v1 as tf
 import numpy as np
 import time
 from scipy.special import comb, perm
+from itertools import permutations
 
 import os
 
@@ -398,15 +399,26 @@ if __name__ == "__main__":
         print(str(s)+"\t"+str(group_shapley_value[len(group_shapley_value)-1]))
 
     agent_shapley = []
+    s=sorted([i for i in range(NUM_AGENT)])
+    l=permutations(s)
+    all_orders = []
+    for x in l:
+        all_orders.append(list(x))
+
+    agent_shapley = []
     for index in range(NUM_AGENT):
         shapley = 0.0
-        for j in all_sets:
-            if index in j:
-                remove_list_index = remove_list_indexed(index, j, all_sets)
-                if remove_list_index != -1:
-                    shapley += (group_shapley_value[shapley_list_indexed(j, all_sets)] - group_shapley_value[
-                        remove_list_index]) / (comb(NUM_AGENT - 1, len(all_sets[remove_list_index])))
+        for order in all_orders:
+            pos = order.index(index)
+            pre_list = list(order[:pos])
+            edge_list = list(order[:pos+1])
+            pre_list_index = remove_list_indexed(index, pre_list, all_sets)
+            
+            if pre_list_index != -1:
+                shapley += (group_shapley_value[shapley_list_indexed(edge_list, all_sets)] - group_shapley_value[
+                    pre_list_index]) / len(all_orders)
         agent_shapley.append(shapley)
+
     for ag_s in agent_shapley:
         print(ag_s)
     print("end_time", time.time()-start_time)

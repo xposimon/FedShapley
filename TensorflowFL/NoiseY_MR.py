@@ -420,10 +420,11 @@ if __name__ == "__main__":
         for local_model_index in range(len(local_models)):
             m_w = np.add(np.multiply(local_models[local_model_index][0], 1 / NUM_AGENT), m_w)
             m_b = np.add(np.multiply(local_models[local_model_index][1], 1 / NUM_AGENT), m_b)
-            model = {
-                'weights': m_w,
-                'bias': m_b
-            }
+        
+        model = {
+            'weights': m_w,
+            'bias': m_b
+        }
 
         f_g = open(os.path.join(os.path.dirname(__file__), "gradientplus_models.txt"), "a")
         g_w = list(model['weights'].reshape(-1))
