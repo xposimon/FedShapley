@@ -32,41 +32,44 @@ def remove_list_indexed(removed_ele, original_l, ll):
 
 
 
-group_shapley_value = [0.04540359, 0.90235424
-,	0.90190583
-,	0.9022421
-,	0.9022421
-,	0.90235424
-,	0.90190583
-,	0.9022421
-,	0.9022421
-,	0.90235424
-,	0.9022421
-,	0.9022421
-,	0.90235424
-,	0.90235424
-,	0.9022421
-,	0.9022421
-,	0.90213007
-,	0.9022421
-,	0.90213007
-,	0.9022421
-,	0.9022421
-,	0.9022421
-,	0.9022421
-,	0.90235424
-,	0.90213007
-,	0.90213007
-,	0.9022421
-,	0.9022421
-,	0.90235424
-,	0.90235424
-,	0.9022421
-,	0.9022421]
+group_shapley_value = [	0.23934978
+,	0.3871076
+,	0.37970853
+,	0.3837444
+,	0.38419282
+,	0.38576233
+,	0.38273543
+,	0.38464126
+,	0.38576233
+,	0.38632286
+,	0.38340807
+,	0.3850897
+,	0.38520178
+,	0.38565022
+,	0.3840807
+,	0.38486546
+,	0.3820628
+,	0.38452914
+,	0.38127804
+,	0.3837444
+,	0.38363227
+,	0.38497758
+,	0.38295963
+,	0.38396862
+,	0.3840807
+,	0.3850897
+,	0.38329595
+,	0.3850897
+,	0.38452914
+,	0.3853139
+,	0.38452914
+,	0.38475338]
 
 # print(remove_list_index, shapley_list_indexed(j, all_sets), group_shapley_value[shapley_list_indexed(j, all_sets)])
 NUM_AGENT = 5
 all_sets = PowerSetsBinary([i for i in range(NUM_AGENT)])
+
+print(len(group_shapley_value))
 
 s=sorted([i for i in range(NUM_AGENT)])
 l=permutations(s)
@@ -92,8 +95,7 @@ for index in range(NUM_AGENT):
 
 for ag_s in agent_shapley:
     print(ag_s)
-print(print(group_shapley_value[0]),sum(agent_shapley), group_shapley_value[shapley_list_indexed([i for i in range(NUM_AGENT)], all_sets)])
 
-print(shapley_list_indexed)
+print(sum(agent_shapley), group_shapley_value[0])
 
 #print(all_sets)

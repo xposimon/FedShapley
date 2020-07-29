@@ -309,7 +309,7 @@ def train_with_gradient_and_valuation(agent_list, grad, bi, lr, distr_type, g_m,
 
     gradient_w = np.zeros([784, 10], dtype=np.float32)
     gradient_b = np.zeros([10], dtype=np.float32)
-    print(agent_list, len(grad), agent_shapley, local_model_index)
+    #print(agent_list, len(grad), agent_shapley, local_model_index)
     
     data_sum = 0
     for i in agent_list:
@@ -317,7 +317,7 @@ def train_with_gradient_and_valuation(agent_list, grad, bi, lr, distr_type, g_m,
     agents_w = [0 for _ in range(NUM_AGENT)]
     for i in agent_list:
         agents_w[i] = datanum[i] / data_sum
-    print(agents_w)
+    #print(agents_w)
     for j in agent_list:
         gradient_w = np.add(np.multiply(grad[j], agents_w[j]), gradient_w)
         gradient_b = np.add(np.multiply(bi[j], agents_w[j]), gradient_b)
@@ -419,7 +419,7 @@ if __name__ == "__main__":
     federated_train_data_divide = None
     federated_train_data = None
     if DISTRIBUTION_TYPE == "SAME":
-        federated_train_data_divide = [get_data_for_federated_agents(mnist_train, d) for d in range(NUM_AGENT)]
+        federated_train_data_divide = [get_data_for_federated_agents(mnist_train, d, noiseX=True) for d in range(NUM_AGENT)]
         federated_train_data = federated_train_data_divide
 
     f_ini_p = open(os.path.join(os.path.dirname(__file__), "initial_model_parameters.txt"), "r")
@@ -451,6 +451,8 @@ if __name__ == "__main__":
     all_orders = []
     for x in l:
         all_orders.append(list(x))
+    
+    agent_shapley_sum = [0 for i in range(NUM_AGENT)]
 
     for round_num in range(50):
         local_models = federated_train(model, learning_rate, federated_train_data)
@@ -488,14 +490,17 @@ if __name__ == "__main__":
                     pre_list = list(order[:pos])
                     edge_list = list(order[:pos+1])
                     pre_list_index = remove_list_indexed(index, pre_list, all_sets)
-                    print(order, pre_list_index, pre_list, edge_list, group_shapley_value[pre_list_index], group_shapley_value[shapley_list_indexed(edge_list, all_sets)])
+                    #print(order, pre_list_index, pre_list, edge_list, group_shapley_value[pre_list_index], group_shapley_value[shapley_list_indexed(edge_list, all_sets)])
                     if pre_list_index != -1:
                         shapley += (group_shapley_value[shapley_list_indexed(edge_list, all_sets)] - group_shapley_value[
                             pre_list_index]) / len(all_orders)
                 agent_shapley.append(shapley)
 
-            for ag_s in agent_shapley:
+            for i, ag_s in enumerate(agent_shapley):
+                agent_shapley_sum[i] += ag_s
                 print(ag_s)
+
+            print(agent_shapley_sum)
 
         m_w = np.zeros([784, 10], dtype=np.float32)
         m_b = np.zeros([10], dtype=np.float32)
@@ -512,5 +517,6 @@ if __name__ == "__main__":
         loss = federated_eval(model, federated_train_data)
         print('round {}, loss={}'.format(round_num, loss))
         print(time.time() - start_time)
-   
+
+    print(agent_shapley_sum)
     print("end_time", time.time() - start_time)
