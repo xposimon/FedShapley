@@ -226,7 +226,8 @@ if __name__ == "__main__":
         test_images = readTestImagesFromFile(False)
         test_labels_onehot = readTestLabelsFromFile(False)
 
-    all_sets = PowerSetsBinary([i for i in range(NUM_AGENT)])
+    #all_sets = PowerSetsBinary([i for i in range(NUM_AGENT)])
+    all_sets = [[i for i in range(NUM_AGENT)]]
     group_shapley_value = []
     for ss in all_sets:
         federated_train_data = []

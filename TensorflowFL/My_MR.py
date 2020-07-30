@@ -16,29 +16,6 @@ BATCH_SIZE = 100
 NUM_AGENT = 5
 DECAY_FACTOR = 0.8
 
-
-def get_data_for_digit(source, digit):
-    output_sequence = []
-    all_samples = [i for i, d in enumerate(source[1]) if d == digit]
-    for i in range(0, len(all_samples), BATCH_SIZE):
-        batch_samples = all_samples[i:i + BATCH_SIZE]
-        output_sequence.append({
-            'x': np.array([source[0][i].flatten() / 255.0 for i in batch_samples],
-                          dtype=np.float32),
-            'y': np.array([source[1][i] for i in batch_samples], dtype=np.int32)})
-    return output_sequence
-
-
-def get_data_for_digit_test(source, digit):
-    output_sequence = []
-    all_samples = [i for i, d in enumerate(source[1]) if d == digit]
-    for i in range(0, len(all_samples)):
-        output_sequence.append({
-            'x': np.array(source[0][all_samples[i]].flatten() / 255.0,
-                          dtype=np.float32),
-            'y': np.array(source[1][all_samples[i]], dtype=np.int32)})
-    return output_sequence
-
 def checkRange(x):
     for i in range(len(x)):
         if x[i] < 0:
@@ -52,10 +29,10 @@ def get_data_for_federated_agents(source, num, weight=False, noiseX=False, noise
     
     if weight:
         # default 1:2:3:4:5
-        weights = [(i+1) for i in range(NUM_AGENT)]
+        weights = [1,2,3,4,5]
         PIECE = int(5421/sum(weights))
         left=sum(weights[:num])
-        print((left,left+num+1))
+        
         output_sequence = []
         Samples = []
 
@@ -104,15 +81,18 @@ def get_data_for_federated_agents(source, num, weight=False, noiseX=False, noise
 
     if noiseX:
         # add noise 3:0.3x, 4:0.4x
+        sum_agent = int(len(all_samples))
+
         ratio = 0
         if num > 2:
-            ratio = num * 0.1
-        sum_agent = int(len(all_samples))
-        index = 0
-        for i in range(0, sum_agent):
-            noiseHere = ratio * np.random.randn(28*28)
-            output_sequence[int(i/BATCH_SIZE)]['x'][i % BATCH_SIZE] = checkRange(np.add(
-                output_sequence[int(i/BATCH_SIZE)]['x'][i % BATCH_SIZE], noiseHere))
+            index = 0
+            print(num, len(output_sequence))
+            for i in range(0, sum_agent):
+                # Deterministic noise
+                # noiseHere = np.random.randn(28*28)
+                noiseHere = ratio * np.array([(-1)**i for i in range(28*28)])
+                output_sequence[int(i/BATCH_SIZE)]['x'][i % BATCH_SIZE] = checkRange(np.add(output_sequence[int(i/BATCH_SIZE)]['x'][i % BATCH_SIZE], noiseHere))
+                output_sequence[int(i/BATCH_SIZE)]['x'][i % BATCH_SIZE] = checkRange(np.random.randn(28*28))
         
     if noiseY:
         rand_index = []
@@ -172,9 +152,7 @@ def batch_train(initial_model, batch, learning_rate):
     with tf.control_dependencies([train_model]):
         return tff.utils.identity(model_vars)
 
-
 LOCAL_DATA_TYPE = tff.SequenceType(BATCH_TYPE)
-
 
 @tff.federated_computation(MODEL_TYPE, tf.float32, LOCAL_DATA_TYPE)
 def local_train(initial_model, learning_rate, all_batches):
@@ -255,53 +233,7 @@ def readTestLabelsFromFile(distr_same):
     return np.asarray(ret)
 
 
-def getParmsAndLearningRate(agent_no):
-    f = open(os.path.join(os.path.dirname(__file__), "weights_" + str(agent_no) + ".txt"))
-    content = f.read()
-    g_ = content.split("***\n--------------------------------------------------")
-    parm_local = []
-    learning_rate_list = []
-    for j in range(len(g_) - 1):
-        line = g_[j].split("\n")
-        if j == 0:
-            weights_line = line[0:784]
-            learning_rate_list.append(float(line[784].replace("*", "").replace("\n", "")))
-        else:
-            weights_line = line[1:785]
-            learning_rate_list.append(float(line[785].replace("*", "").replace("\n", "")))
-        valid_weights_line = []
-        for l in weights_line:
-            w_list = l.split("\t")
-            w_list = w_list[0:len(w_list) - 1]
-            w_list = [float(i) for i in w_list]
-            valid_weights_line.append(w_list)
-        parm_local.append(valid_weights_line)
-    f.close()
-
-    f = open(os.path.join(os.path.dirname(__file__), "bias_" + str(agent_no) + ".txt"))
-    content = f.read()
-    g_ = content.split("***\n--------------------------------------------------")
-    bias_local = []
-    for j in range(len(g_) - 1):
-        line = g_[j].split("\n")
-        if j == 0:
-            weights_line = line[0]
-        else:
-            weights_line = line[1]
-        b_list = weights_line.split("\t")
-        b_list = b_list[0:len(b_list) - 1]
-        b_list = [float(i) for i in b_list]
-        bias_local.append(b_list)
-    f.close()
-    ret = {
-        'weights': np.asarray(parm_local),
-        'bias': np.asarray(bias_local),
-        'learning_rate': np.asarray(learning_rate_list)
-    }
-    return ret
-
-
-def train_with_gradient_and_valuation(agent_list, grad, bi, lr, distr_type, g_m, datanum):
+def train_with_gradient_and_valuation(agent_list, grad, bi, g_m, datanum):
     model_g = {
         'weights': g_m[0],
         'bias': g_m[1]
@@ -317,13 +249,13 @@ def train_with_gradient_and_valuation(agent_list, grad, bi, lr, distr_type, g_m,
     agents_w = [0 for _ in range(NUM_AGENT)]
     for i in agent_list:
         agents_w[i] = datanum[i] / data_sum
-    #print(agents_w)
+    print(agents_w)
     for j in agent_list:
         gradient_w = np.add(np.multiply(grad[j], agents_w[j]), gradient_w)
         gradient_b = np.add(np.multiply(bi[j], agents_w[j]), gradient_b)
-
-    model_g['weights'] = np.subtract(model_g['weights'], np.multiply(lr, gradient_w))
-    model_g['bias'] = np.subtract(model_g['bias'], np.multiply(lr, gradient_b))
+    
+    model_g['weights'] = np.subtract(model_g['weights'], gradient_w)
+    model_g['bias'] = np.subtract(model_g['bias'], gradient_b)
 
     test_images = readTestImagesFromFile(False)
     test_labels_onehot = readTestLabelsFromFile(False)
@@ -402,7 +334,7 @@ def loadHistoryModels():
 
 
 if __name__ == "__main__":
-    start_time = time.time()
+    
     # data_num = np.asarray([5923, 6742, 5958, 6131, 5842])
     # agents_weights = np.divide(data_num, data_num.sum())
     # for index in range(NUM_AGENT):
@@ -414,13 +346,18 @@ if __name__ == "__main__":
     # f.close()
     mnist_train, mnist_test = tf.keras.datasets.mnist.load_data()
 
-    DISTRIBUTION_TYPE = "SAME"
-
     federated_train_data_divide = None
     federated_train_data = None
-    if DISTRIBUTION_TYPE == "SAME":
-        federated_train_data_divide = [get_data_for_federated_agents(mnist_train, d, noiseX=True) for d in range(NUM_AGENT)]
-        federated_train_data = federated_train_data_divide
+    
+    federated_train_data_divide = [get_data_for_federated_agents(mnist_train, d, noiseX=True) for d in range(NUM_AGENT)]
+    federated_train_data = federated_train_data_divide
+
+    for i in range(NUM_AGENT):
+        print(len(federated_train_data[i]))
+    
+    total_len = sum([len(federated_train_data[i]) for i in range(NUM_AGENT)])
+    agents_w = [len(federated_train_data[i])/total_len for i in range(NUM_AGENT)]
+    print(agents_w)
 
     f_ini_p = open(os.path.join(os.path.dirname(__file__), "initial_model_parameters.txt"), "r")
     para_lines = f_ini_p.readlines()
@@ -455,30 +392,43 @@ if __name__ == "__main__":
     agent_shapley_sum = [0 for i in range(NUM_AGENT)]
 
     for round_num in range(50):
+        start_time = time.time()
         local_models = federated_train(model, learning_rate, federated_train_data)
+        end_time = time.time()
+        print("local train time:", (end_time-start_time)/len(federated_train_data))
         print("learning rate: ", learning_rate)
         # print(local_models[0][0])#第0个agent的weights矩阵
         # print(local_models[0][1])#第0个agent的bias矩阵
-        
+        for local_model_index in range(len(local_models)):
+            test_images = readTestImagesFromFile(False)
+            test_labels_onehot = readTestLabelsFromFile(False)
+            m = np.dot(test_images, np.asarray(local_models[local_model_index][0]))
+            test_result = m + np.asarray(local_models[local_model_index][1])
+            y = tf.nn.softmax(test_result)
+            correct_prediction = tf.equal(tf.argmax(y, 1), tf.arg_max(test_labels_onehot, 1))
+            accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
+            print(local_model_index, ":", accuracy.numpy())
+
         group_shapley_value = []
         agent_shapley = []
         if round_num == 0:
             pre_weights = np.array([local_models[local_model_index][0] for local_model_index in range(len(local_models))])
             pre_bias = np.array([local_models[local_model_index][1] for local_model_index in range(len(local_models))])
         else:
+            
             gradient_weight = []
             gradient_bias = []
-            print(len(pre_weights), len(pre_weights[0]))
+            
             for k in range(NUM_AGENT):
-                gradient_weight.append(np.divide(np.subtract(pre_weights[k], local_models[k][0]), learning_rate))
-                gradient_bias.append(np.divide(np.subtract(pre_bias[k], local_models[k][1]), learning_rate))
+                gradient_weight.append(np.subtract(model['weights'], local_models[k][0]))
+                gradient_bias.append(np.subtract(model['bias'], local_models[k][1]))
             
             pre_weights = np.array([local_models[local_model_index][0] for local_model_index in range(len(local_models))])
             pre_bias = np.array([local_models[local_model_index][1] for local_model_index in range(len(local_models))])
 
             for s in all_sets:
                 group_shapley_value.append(
-                    train_with_gradient_and_valuation(s, gradient_weight, gradient_bias, learning_rate, DISTRIBUTION_TYPE,
+                    train_with_gradient_and_valuation(s, gradient_weight, gradient_bias,
                                                     [model['weights'], model['bias']], data_num))
                 print(str(s) + "\t" + str(group_shapley_value[len(group_shapley_value) - 1]))
             
@@ -505,18 +455,17 @@ if __name__ == "__main__":
         m_w = np.zeros([784, 10], dtype=np.float32)
         m_b = np.zeros([10], dtype=np.float32)
         for local_model_index in range(len(local_models)):
-            m_w = np.add(np.multiply(local_models[local_model_index][0], 1 / NUM_AGENT), m_w)
-            m_b = np.add(np.multiply(local_models[local_model_index][1], 1 / NUM_AGENT), m_b)
+            m_w = np.add(np.multiply(local_models[local_model_index][0], agents_w[local_model_index]), m_w)
+            m_b = np.add(np.multiply(local_models[local_model_index][1], agents_w[local_model_index]), m_b)
         model = {
                 'weights': m_w,
                 'bias': m_b
         }
-
 
         learning_rate = learning_rate * 0.9
         loss = federated_eval(model, federated_train_data)
         print('round {}, loss={}'.format(round_num, loss))
         print(time.time() - start_time)
 
-    print(agent_shapley_sum)
+    #print(agent_shapley_sum)
     print("end_time", time.time() - start_time)

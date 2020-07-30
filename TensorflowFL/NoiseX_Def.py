@@ -84,7 +84,8 @@ def get_data_for_federated_agents(source, num):
     sum_agent = int(len(all_samples))
     
     for i in range(0, sum_agent):
-        noiseHere = ratio * np.random.randn(28*28)
+        # Deterministic noise
+        noiseHere = ratio * np.array([(-1)**i for i in range(28*28)])
         output_sequence[int(i/BATCH_SIZE)]['x'][i % BATCH_SIZE] = checkRange(np.add(
             output_sequence[int(i/BATCH_SIZE)]['x'][i % BATCH_SIZE], noiseHere))
 
@@ -256,6 +257,7 @@ if __name__ == "__main__":
         test_labels_onehot = readTestLabelsFromFile(False)
 
     all_sets = PowerSetsBinary([i for i in range(NUM_AGENT)])
+    #all_sets = [[i for i in range(NUM_AGENT)]]
     group_shapley_value = []
     for ss in all_sets:
         federated_train_data = []
@@ -293,10 +295,10 @@ if __name__ == "__main__":
                     local_models[local_model_index][0], 1/len(ss)), m_w)
                 m_b = np.add(np.multiply(
                     local_models[local_model_index][1], 1/len(ss)), m_b)
-                model = {
-                    'weights': m_w,
-                    'bias': m_b
-                }
+            model = {
+                'weights': m_w,
+                'bias': m_b
+            }
             learning_rate = learning_rate * 0.9
             loss = federated_eval(model, federated_train_data)
             print('round {}, loss={}'.format(round_num, loss))

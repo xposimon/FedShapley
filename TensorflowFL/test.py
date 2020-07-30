@@ -32,38 +32,38 @@ def remove_list_indexed(removed_ele, original_l, ll):
 
 
 
-group_shapley_value = [	0.23934978
-,	0.3871076
-,	0.37970853
-,	0.3837444
-,	0.38419282
-,	0.38576233
-,	0.38273543
-,	0.38464126
-,	0.38576233
-,	0.38632286
-,	0.38340807
-,	0.3850897
-,	0.38520178
-,	0.38565022
-,	0.3840807
-,	0.38486546
-,	0.3820628
-,	0.38452914
-,	0.38127804
-,	0.3837444
-,	0.38363227
-,	0.38497758
-,	0.38295963
-,	0.38396862
-,	0.3840807
-,	0.3850897
-,	0.38329595
-,	0.3850897
-,	0.38452914
-,	0.3853139
-,	0.38452914
-,	0.38475338]
+group_shapley_value = [	0.1
+,	0.15930493
+,	0.15033633
+,	0.15426008
+,	0.16188341
+,	0.16132288
+,	0.15538117
+,	0.15672646
+,	0.18621077
+,	0.16984305
+,	0.1647982
+,	0.16278027
+,	0.16995516
+,	0.16558295
+,	0.16278027
+,	0.16188341
+,	0.13441704
+,	0.14360987
+,	0.14147982
+,	0.1456278
+,	0.14607623
+,	0.1501121
+,	0.14730942
+,	0.14943947
+,	0.15168162
+,	0.15392376
+,	0.1515695
+,	0.15313901
+,	0.1543722
+,	0.15538117
+,	0.15358745
+,	0.1544843]
 
 # print(remove_list_index, shapley_list_indexed(j, all_sets), group_shapley_value[shapley_list_indexed(j, all_sets)])
 NUM_AGENT = 5
@@ -85,7 +85,7 @@ for index in range(NUM_AGENT):
         pre_list = list(order[:pos])
         edge_list = list(order[:pos+1])
         pre_list_index = remove_list_indexed(index, pre_list, all_sets)
-        #print(order ,pre_list, pre_list_index, all_sets[pre_list_index])
+        print(order ,pre_list, pre_list_index, all_sets[pre_list_index])
 
         if pre_list_index != -1:
             #print(j, remove_list_index, all_sets[remove_list_index])
@@ -96,6 +96,6 @@ for index in range(NUM_AGENT):
 for ag_s in agent_shapley:
     print(ag_s)
 
-print(sum(agent_shapley), group_shapley_value[0])
+print(sum(agent_shapley), group_shapley_value,)
 
 #print(all_sets)
