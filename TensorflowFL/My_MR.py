@@ -2,19 +2,20 @@ from __future__ import absolute_import, division, print_function
 import tensorflow_federated as tff
 import tensorflow.compat.v1 as tf
 import numpy as np
-import time
+import time, os
+import sys
 from scipy.special import comb, perm
 from itertools import permutations
+from sklearn_extra.cluster import KMedoids
 
-import os
+tf.enable_v2_behavior()
+tf.enable_eager_execution()
 
-# tf.compat.v1.enable_v2_behavior()
-# tf.compat.v1.enable_eager_execution()
-
-# NUM_EXAMPLES_PER_USER = 1000
-BATCH_SIZE = 100
 NUM_AGENT = 5
-DECAY_FACTOR = 0.8
+NUM_CLUSTER = 5
+SHARE_ROUND= 20
+BATCH_SIZE = 100
+ITER_ROUND = 50
 
 def checkRange(x):
     for i in range(len(x)):
@@ -25,110 +26,115 @@ def checkRange(x):
             x[i] = 1
     return x
 
-def get_data_for_federated_agents(source, num, weight=False, noiseX=False, noiseY=False):
-    
+def handle_readfile(x):
+    return float(x.strip("[").strip("]").strip())
+
+def get_data_for_federated_agents(x, y, num, weight=False, noiseX=False):
+
+    samples_len = len(x)
+    output_sequence = []
+    Classes = []
+
     if weight:
-        # default 1:2:3:4:5
-        weights = [1,2,3,4,5]
-        PIECE = int(5421/sum(weights))
-        left=sum(weights[:num])
-        
-        output_sequence = []
-        Samples = []
+        if len(weight) != NUM_AGENT:
+            raise RuntimeError("Weights not corret")
+        for w in weight:
+            if w <= 0:
+                raise RuntimeError("Weights not corret")
 
-        for digit in range(0, 10):
-            samples = [i for i, d in enumerate(source[1]) if d == digit]
-            samples = samples[0:5421]
-            Samples.append(samples)
-
-        all_samples = []
-        for sample in Samples:
-            for sample_index in range(left*PIECE,(left+num+1)*PIECE):
-                if sample_index >= len(sample):
-                    break
-                all_samples.append(sample[sample_index])
-
-        # all_samples = [i for i in range(int(num*(len(source[1])/NUM_AGENT)), int((num+1)*(len(source[1])/NUM_AGENT)))]
-
-        for i in range(0, len(all_samples), BATCH_SIZE):
-            batch_samples = all_samples[i:i + BATCH_SIZE]
-            output_sequence.append({
-                'x': np.array([source[0][i].flatten() / 255.0 for i in batch_samples],
-                            dtype=np.float32),
-                'y': np.array([source[1][i] for i in batch_samples], dtype=np.int32)})
+        piece_num = int(samples_len/sum(weight))
+        left=sum(weight[:num])
+        right = left+num+1
     else:
-        output_sequence = []
+        piece_num = samples_len/NUM_AGENT
+        left = num
+        right = num+1
 
-        Samples = []
-        for digit in range(0, 10):
-            samples = [i for i, d in enumerate(source[1]) if d == digit]
-            samples = samples[0:5421]
-            Samples.append(samples)
+    all_samples = [i for i in range(int(left*piece_num), int(right*piece_num))]
 
-        all_samples = []
-        for sample in Samples:
-            for sample_index in range(int(num * (len(sample) / NUM_AGENT)), int((num + 1) * (len(sample) / NUM_AGENT))):
-                all_samples.append(sample[sample_index])
-
-        # all_samples = [i for i in range(int(num*(len(source[1])/NUM_AGENT)), int((num+1)*(len(source[1])/NUM_AGENT)))]
-
-        for i in range(0, len(all_samples), BATCH_SIZE):
-            batch_samples = all_samples[i:i + BATCH_SIZE]
-            output_sequence.append({
-                'x': np.array([source[0][i].flatten() / 255.0 for i in batch_samples],
-                            dtype=np.float32),
-                'y': np.array([source[1][i] for i in batch_samples], dtype=np.int32)})
+    for i in range(0, len(all_samples), BATCH_SIZE):
+        batch_samples = all_samples[i:i + BATCH_SIZE]
+        output_sequence.append({
+            'x': np.array([x[i].flatten() / SCALE for i in batch_samples],
+                        dtype=np.float32),
+            'y': np.array([y[i] for i in batch_samples], dtype=np.int32)})
 
     if noiseX:
-        # add noise 3:0.3x, 4:0.4x
-        sum_agent = int(len(all_samples))
+        if num >= 90:
+            ratio = 0.3
+            sum_agent = len(all_samples)
+            x_dim =  len(output_sequence[0]['x'][0])
+            noisepart = x_dim/2
+            print(noisepart)
+            #noise = ratio * np.array([(-1)**k if k <= noisepart else 0 for k in range(x_dim)])
 
-        ratio = 0
-        if num > 2:
-            index = 0
-            print(num, len(output_sequence))
+            directory = os.path.dirname(__file__)
+            with open(os.path.join(directory, "noise.out"), "r") as f:
+                content = f.read()
+
+            noise = content.split(",")
+            noise = np.array(list(map(handle_readfile, noise)))
+
             for i in range(0, sum_agent):
                 # Deterministic noise
-                # noiseHere = np.random.randn(28*28)
-                noiseHere = ratio * np.array([(-1)**i for i in range(28*28)])
-                output_sequence[int(i/BATCH_SIZE)]['x'][i % BATCH_SIZE] = checkRange(np.add(output_sequence[int(i/BATCH_SIZE)]['x'][i % BATCH_SIZE], noiseHere))
-                output_sequence[int(i/BATCH_SIZE)]['x'][i % BATCH_SIZE] = checkRange(np.random.randn(28*28))
-        
-    if noiseY:
-        rand_index = []
-        rand_label = []
-        with open(os.path.join(os.path.dirname(__file__), "random_index.txt"), "r") as randomIndex:
-            lines = randomIndex.readlines()
-        for line in lines:
-            rand_index.append(eval(line))
-        with open(os.path.join(os.path.dirname(__file__), "random_label.txt"), "r") as randomLabel:
-            lines = randomLabel.readlines()
-            for line in lines:
-                rand_label.append(eval(line))
+                #output_sequence[int(i/BATCH_SIZE)]['x'][i % BATCH_SIZE] = checkRange(np.add(output_sequence[int(i/BATCH_SIZE)]['x'][i % BATCH_SIZE], noise))
+                output_sequence[int(i/BATCH_SIZE)]['x'][i % BATCH_SIZE] = checkRange(ratio*np.random.randn(x_dim))
 
-        noiseList = rand_index[num][0:int(ratio*sum_agent)]
-        noiseLabel = rand_label[num][0:int(ratio*sum_agent)]
-        # noiseList = random.sample(range(0, sum_agent), int(ratio*sum_agent))
-        # noiseLabel = []
-        index = 0
-        for i in noiseList:
-            # noiseHere = random.randint(1, 9)
-            # noiseLabel.append(noiseHere)
-            noiseHere = noiseLabel[index]
-            index = index + 1
-            output_sequence[int(i/BATCH_SIZE)]['y'][i % BATCH_SIZE] = (
-                output_sequence[int(i/BATCH_SIZE)]['y'][i % BATCH_SIZE]+noiseHere) % 10
-   
-    return output_sequence    
-        
+    return output_sequence
+
+# Data reading
+######################################################################################################################
+
+(train_x, train_y), (test_x, test_y) = tf.keras.datasets.mnist.load_data()
+train_x = np.asarray(train_x.reshape(len(train_x), -1), dtype=np.float32)
+train_y = np.asarray(train_y, dtype=np.int32)
+
+# TODO fast debug
+# train_x = train_x[:2000]
+# train_y = train_y[:2000]
+
+SCALE = np.float32(max(np.max(train_x), np.max(test_x)))
+
+federated_train_data = [get_data_for_federated_agents(train_x, train_y, d) for d in range(NUM_AGENT)]
+for i in range(NUM_AGENT):
+    print(len(federated_train_data[i]),federated_train_data[i][0]['x'].shape)
+
+
+with open(os.path.join(os.path.dirname(__file__), "initial_model_parameters.txt"), "r") as f_ini_p:
+    para_lines = f_ini_p.readlines()
+
+w_paras = para_lines[0].split("\t")
+w_paras = [float(i) for i in w_paras]
+b_paras = para_lines[1].split("\t")
+b_paras = [float(i) for i in b_paras]
+
+para_num = len(federated_train_data[0][0]['x'][0])
+class_num = len(np.unique(test_y))
+
+# para_num = 28*28
+# class_num = 10
+
+test_x = np.asarray(test_x.reshape(len(test_x), para_num), dtype=np.float32)
+test_x = np.divide(test_x, SCALE)
+test_y = np.asarray(test_y, dtype=np.int32)
+
+w_initial = np.asarray(w_paras, dtype=np.float32).reshape([para_num, class_num])
+b_initial = np.asarray(b_paras, dtype=np.float32).reshape([class_num])
+
+model = {
+    'weights': w_initial,
+    'bias': b_initial
+}
+
+######################################################################################################################
+
 BATCH_TYPE = tff.NamedTupleType([
-    ('x', tff.TensorType(tf.float32, [None, 784])),
+    ('x', tff.TensorType(tf.float32, [None, para_num])),
     ('y', tff.TensorType(tf.int32, [None]))])
 
 MODEL_TYPE = tff.NamedTupleType([
-    ('weights', tff.TensorType(tf.float32, [784, 10])),
-    ('bias', tff.TensorType(tf.float32, [10]))])
-
+    ('weights', tff.TensorType(tf.float32, [para_num, class_num])),
+    ('bias', tff.TensorType(tf.float32, [class_num]))])
 
 @tff.tf_computation(MODEL_TYPE, BATCH_TYPE)
 def batch_loss(model, batch):
@@ -136,21 +142,22 @@ def batch_loss(model, batch):
     return -tf.reduce_mean(tf.reduce_sum(
         tf.one_hot(batch.y, 10) * tf.log(predicted_y), axis=[1]))
 
-
 @tff.tf_computation(MODEL_TYPE, BATCH_TYPE, tf.float32)
 def batch_train(initial_model, batch, learning_rate):
     # Define a group of model variables and set them to `initial_model`.
     model_vars = tff.utils.create_variables('v', MODEL_TYPE)
-    init_model = tff.utils.assign(model_vars, initial_model)
+    train_model = tff.utils.assign(model_vars, initial_model)
 
-    # Perform one step of gradient descent using loss from `batch_loss`.
+    # Perform `SHARE_ROUND` step of gradient descent using loss from `batch_loss`.
     optimizer = tf.train.GradientDescentOptimizer(learning_rate)
-    with tf.control_dependencies([init_model]):
-        train_model = optimizer.minimize(batch_loss(model_vars, batch))
+    with tf.control_dependencies([train_model]):
+        for i in range(SHARE_ROUND):
+            train_model = optimizer.minimize(batch_loss(model_vars, batch))
 
     # Return the model vars after performing this gradient descent step.
     with tf.control_dependencies([train_model]):
         return tff.utils.identity(model_vars)
+
 
 LOCAL_DATA_TYPE = tff.SequenceType(BATCH_TYPE)
 
@@ -161,8 +168,7 @@ def local_train(initial_model, learning_rate, all_batches):
     def batch_fn(model, batch):
         return batch_train(model, batch, learning_rate)
 
-    l = tff.sequence_reduce(all_batches, initial_model, batch_fn)
-    return l
+    return tff.sequence_reduce(all_batches, initial_model, batch_fn)
 
 
 @tff.federated_computation(MODEL_TYPE, LOCAL_DATA_TYPE)
@@ -170,7 +176,8 @@ def local_eval(model, all_batches):
     #
     return tff.sequence_sum(
         tff.sequence_map(
-            tff.federated_computation(lambda b: batch_loss(model, b), BATCH_TYPE),
+            tff.federated_computation(
+                lambda b: batch_loss(model, b), BATCH_TYPE),
             all_batches))
 
 
@@ -189,58 +196,22 @@ SERVER_FLOAT_TYPE = tff.FederatedType(tf.float32, tff.SERVER, all_equal=True)
 
 @tff.federated_computation(
     SERVER_MODEL_TYPE, SERVER_FLOAT_TYPE, CLIENT_DATA_TYPE)
-def federated_train(model, learning_rate, data):
-    l = tff.federated_map(
+def tf_federated_train(model, learning_rate, data):
+
+    return tff.federated_map(
         local_train,
         [tff.federated_broadcast(model),
          tff.federated_broadcast(learning_rate),
          data])
-    return l
-    # return tff.federated_mean()
 
-
-def readTestImagesFromFile(distr_same):
-    ret = []
-    if distr_same:
-        f = open(os.path.join(os.path.dirname(__file__), "test_images1_.txt"), encoding="utf-8")
-    else:
-        f = open(os.path.join(os.path.dirname(__file__), "test_images1_.txt"), encoding="utf-8")
-    lines = f.readlines()
-    for line in lines:
-        tem_ret = []
-        p = line.replace("[", "").replace("]", "").replace("\n", "").split("\t")
-        for i in p:
-            if i != "":
-                tem_ret.append(float(i))
-        ret.append(tem_ret)
-    return np.asarray(ret)
-
-
-def readTestLabelsFromFile(distr_same):
-    ret = []
-    if distr_same:
-        f = open(os.path.join(os.path.dirname(__file__), "test_labels_.txt"), encoding="utf-8")
-    else:
-        f = open(os.path.join(os.path.dirname(__file__), "test_labels_.txt"), encoding="utf-8")
-    lines = f.readlines()
-    for line in lines:
-        tem_ret = []
-        p = line.replace("[", "").replace("]", "").replace("\n", "").split(" ")
-        for i in p:
-            if i != "":
-                tem_ret.append(float(i))
-        ret.append(tem_ret)
-    return np.asarray(ret)
-
-
-def train_with_gradient_and_valuation(agent_list, grad, bi, g_m, datanum):
+def tf_train_with_gradient_and_valuation(agent_list, grad, bi, g_m, datanum):
     model_g = {
         'weights': g_m[0],
         'bias': g_m[1]
     }
 
-    gradient_w = np.zeros([784, 10], dtype=np.float32)
-    gradient_b = np.zeros([10], dtype=np.float32)
+    gradient_w = np.zeros([para_num, class_num], dtype=np.float32)
+    gradient_b = np.zeros([class_num], dtype=np.float32)
     #print(agent_list, len(grad), agent_shapley, local_model_index)
     
     data_sum = 0
@@ -257,12 +228,10 @@ def train_with_gradient_and_valuation(agent_list, grad, bi, g_m, datanum):
     model_g['weights'] = np.subtract(model_g['weights'], gradient_w)
     model_g['bias'] = np.subtract(model_g['bias'], gradient_b)
 
-    test_images = readTestImagesFromFile(False)
-    test_labels_onehot = readTestLabelsFromFile(False)
-    m = np.dot(test_images, np.asarray(model_g['weights']))
+    m = np.dot(test_x, np.asarray(model_g['weights']))
     test_result = m + np.asarray(model_g['bias'])
     y = tf.nn.softmax(test_result)
-    correct_prediction = tf.equal(tf.argmax(y, 1), tf.arg_max(test_labels_onehot, 1))
+    correct_prediction = tf.equal(tf.argmax(y, 1), test_y)
     accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
     return accuracy.numpy()
 
@@ -298,165 +267,181 @@ def PowerSetsBinary(items):
         set_all.append(combo)
     return set_all
 
-
-def loadHistoryModels():
-    f = open(os.path.join(os.path.dirname(__file__), "gradientplus_models.txt"), "r")
-    lines = f.readlines()
-    ret_models = []
-
-    f_ini_p = open(os.path.join(os.path.dirname(__file__), "initial_model_parameters.txt"), "r")
-    para_lines = f_ini_p.readlines()
-    w_paras = para_lines[0].split("\t")
-    w_paras = [float(i) for i in w_paras]
-    b_paras = para_lines[1].split("\t")
-    b_paras = [float(i) for i in b_paras]
-    w_initial = np.asarray(w_paras, dtype=np.float32).reshape([784, 10])
-    b_initial = np.asarray(b_paras, dtype=np.float32).reshape([10])
-    f_ini_p.close()
-
-    ret_models.append([w_initial,b_initial])
-
-    tem_model = []
-    for i, line in enumerate(lines):
-        if i % 2 == 0:
-            lis = line.strip().replace("[", "").replace("]", "").split(",")
-            lis = [float(i.strip()) for i in lis]
-            lis = np.array(lis).reshape([784, 10])
-            tem_model = [lis]
-        else:
-            lis = line.strip().replace("[", "").replace("]", "").split(",")
-            lis = [float(i.strip()) for i in lis]
-            lis = np.array(lis)
-            tem_model.append(lis)
-            ret_models.append(tem_model)
-    f.close()
-    return ret_models
-
-
 if __name__ == "__main__":
     
-    # data_num = np.asarray([5923, 6742, 5958, 6131, 5842])
-    # agents_weights = np.divide(data_num, data_num.sum())
-    # for index in range(NUM_AGENT):
-    #     f = open(os.path.join(os.path.dirname(__file__), "weights_" + str(index) + ".txt"), "w")
-    #     f.close()
-    #     f = open(os.path.join(os.path.dirname(__file__), "bias_" + str(index) + ".txt"), "w")
-    #     f.close()
-    # f = open(os.path.join(os.path.dirname(__file__), "gradientplus_models.txt"), "w")
-    # f.close()
-    mnist_train, mnist_test = tf.keras.datasets.mnist.load_data()
+    if len(sys.argv) > 1:
+        if sys.argv[1] == 'del_low':
+            del_low=True
+            print("del low")
+            removed_agents = []
+        elif sys.argv[1] == 'del_high':
+            del_high=True
+    else:
+        del_low = False
+        del_high = False
 
-    federated_train_data_divide = None
-    federated_train_data = None
-    
-    federated_train_data_divide = [get_data_for_federated_agents(mnist_train, d, noiseX=True) for d in range(NUM_AGENT)]
-    federated_train_data = federated_train_data_divide
 
-    for i in range(NUM_AGENT):
-        print(len(federated_train_data[i]))
-    
-    total_len = sum([len(federated_train_data[i]) for i in range(NUM_AGENT)])
-    agents_w = [len(federated_train_data[i])/total_len for i in range(NUM_AGENT)]
-    print(agents_w)
+    total_time = time.time()
 
-    f_ini_p = open(os.path.join(os.path.dirname(__file__), "initial_model_parameters.txt"), "r")
-    para_lines = f_ini_p.readlines()
-    w_paras = para_lines[0].split("\t")
-    w_paras = [float(i) for i in w_paras]
-    b_paras = para_lines[1].split("\t")
-    b_paras = [float(i) for i in b_paras]
-    w_initial = np.asarray(w_paras, dtype=np.float32).reshape([784, 10])
-    b_initial = np.asarray(b_paras, dtype=np.float32).reshape([10])
-    f_ini_p.close()
-
-    initial_model = {
-        'weights': w_initial,
-        'bias': b_initial
-    }
-    model = initial_model
-    all_sets = PowerSetsBinary([i for i in range(NUM_AGENT)])
+    cur_agent_num = NUM_AGENT
     learning_rate = 0.1
     pre_weights = []
     pre_bias = []
     
-    m_w = np.zeros([784, 10], dtype=np.float32)
-    m_b = np.zeros([10], dtype=np.float32)
-    data_num = np.asarray([len(sample) for sample in federated_train_data_divide])
+    m_w = np.zeros([para_num, class_num], dtype=np.float32)
+    m_b = np.zeros([class_num], dtype=np.float32)
 
-    s=sorted([i for i in range(NUM_AGENT)])
-    l=permutations(s)
-    all_orders = []
-    for x in l:
-        all_orders.append(list(x))
-    
     agent_shapley_sum = [0 for i in range(NUM_AGENT)]
 
-    for round_num in range(50):
+    for round_num in range(ITER_ROUND):
         start_time = time.time()
-        local_models = federated_train(model, learning_rate, federated_train_data)
+        ## For tf
+        local_models = tf_federated_train(model, learning_rate, federated_train_data)
         end_time = time.time()
         print("local train time:", (end_time-start_time)/len(federated_train_data))
         print("learning rate: ", learning_rate)
-        # print(local_models[0][0])#第0个agent的weights矩阵
-        # print(local_models[0][1])#第0个agent的bias矩阵
-        for local_model_index in range(len(local_models)):
-            test_images = readTestImagesFromFile(False)
-            test_labels_onehot = readTestLabelsFromFile(False)
-            m = np.dot(test_images, np.asarray(local_models[local_model_index][0]))
-            test_result = m + np.asarray(local_models[local_model_index][1])
-            y = tf.nn.softmax(test_result)
-            correct_prediction = tf.equal(tf.argmax(y, 1), tf.arg_max(test_labels_onehot, 1))
-            accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
-            print(local_model_index, ":", accuracy.numpy())
+        
+        start_time = time.time()
+        if cur_agent_num > NUM_CLUSTER:
+            func_outputs = [] 
+            for i in range(cur_agent_num):
+                
+                m = np.dot(test_x, np.asarray(local_models[i][0]))
+                test_result = m + np.asarray(local_models[i][1])
+                func_outputs.append(test_result.reshape(-1))
+
+            func_outputs = np.asarray(func_outputs)
+            print(func_outputs.shape)
+            kmedoids = KMedoids(metric="cosine", n_clusters=NUM_CLUSTER, random_state=0).fit(func_outputs)
+            cluster_tags = kmedoids.labels_
+
+            k = 0
+            while k < max(list(cluster_tags))+1:
+                if k not in cluster_tags:
+                    for j in range(len(cluster_tags)):
+                        if k < cluster_tags[j]:
+                            cluster_tags[j] -= 1
+                else:
+                    k += 1
+
+            cluster_cnt = [list(cluster_tags).count(i) for i in range(NUM_CLUSTER)]
+            agents_select = [[] for i in range(max(list(cluster_tags))+1)]
+            print(agents_select, cluster_tags)
+            for i in range(cur_agent_num):
+                agents_select[cluster_tags[i]].append(i)
+        else:
+            agents_select = [[i] for i in range(cur_agent_num)]
+            cluster_tags = [i for i in range(cur_agent_num)]
+            cluster_cnt = [1 for i in range(cur_agent_num)]
+
+        print(agents_select)
+
+        all_sets = PowerSetsBinary([i for i in range(len(agents_select))])
+        s=sorted([i for i in range(len(agents_select))])
+
+        l=permutations(s)
+        all_orders = []
+        for x in l:
+            all_orders.append(list(x))
 
         group_shapley_value = []
         agent_shapley = []
-        if round_num == 0:
-            pre_weights = np.array([local_models[local_model_index][0] for local_model_index in range(len(local_models))])
-            pre_bias = np.array([local_models[local_model_index][1] for local_model_index in range(len(local_models))])
+        
+        gradient_weight = []
+        gradient_bias = []
+        data_num = np.asarray([0 for i in range(len(agents_select))])
+        for i in range(cur_agent_num):
+            data_num[cluster_tags[i]] += len(federated_train_data[i])
+        
+        for k in range(len(agents_select)):
+            avg_w = np.zeros([para_num, class_num], dtype=np.float32)
+            avg_b = np.zeros([class_num], dtype=np.float32)
+            for j in agents_select[k]:
+                avg_w = np.add(local_models[j][0], avg_w)
+                avg_b = np.add(local_models[j][1], avg_b)
+            
+            avg_w = np.divide(avg_w, len(agents_select[k]))
+            avg_b = np.divide(avg_b, len(agents_select[k]))
+            tmp_w_gra = np.subtract(model['weights'], avg_w)
+            tmp_b_gra = np.subtract(model['bias'], avg_b)
+
+            gradient_weight.append(tmp_w_gra.copy())
+            gradient_bias.append(tmp_b_gra.copy())
+        
+        for s in all_sets:
+            group_shapley_value.append(
+                tf_train_with_gradient_and_valuation(s, gradient_weight, gradient_bias,
+                                                [model['weights'], model['bias']], data_num))
+            print(s, [agents_select[s[i]] for i in range(len(s))], str(group_shapley_value[-1]))
+        
+        cluster_shapley = []
+        for index in range(len(agents_select)):
+            shapley = 0.0
+            for order in all_orders:
+                pos = order.index(index)
+                pre_list = list(order[:pos])
+                edge_list = list(order[:pos+1])
+                pre_list_index = remove_list_indexed(index, pre_list, all_sets)
+                #print(order, pre_list_index, pre_list, edge_list, group_shapley_value[pre_list_index], group_shapley_value[shapley_list_indexed(edge_list, all_sets)])
+                if pre_list_index != -1:
+                    shapley += (group_shapley_value[shapley_list_indexed(edge_list, all_sets)] - group_shapley_value[
+                        pre_list_index]) / len(all_orders)
+            cluster_shapley.append(shapley)
+
+        for i in range(cur_agent_num):
+            tag = cluster_tags[i]
+            agent_shapley_sum[i] += (cluster_shapley[tag] / cluster_cnt[tag])
+
+        if del_low==True:
+            to_remove_list = []
+            for tag in range(len(agents_select)):
+                if cluster_shapley[tag] < 0:
+                    # Remove all in the cluster
+                    tmp = []
+                    for idx in agents_select[tag]:
+                        print(idx, agent_shapley_sum)
+                        tmp.append((idx, agent_shapley_sum[idx]))
+                        to_remove_list.append(idx)
+                        
+                        print("[+] Remove %d"%(idx), cluster_shapley[tag])
+                        # print(removed_agents)
+                    removed_agents.append((NUM_AGENT-cur_agent_num, tmp))
+                    cur_agent_num -= len(agents_select[tag])
+
+            if len(to_remove_list) > 0:
+                
+                agent_shapley_sum = [j for i,j in enumerate(agent_shapley_sum) if i not in to_remove_list]
+                federated_train_data = [j for i,j in enumerate(federated_train_data) if i not in to_remove_list]
+
+                if cur_agent_num > NUM_CLUSTER:
+                    all_sets = PowerSetsBinary([i for i in range(NUM_CLUSTER)])
+                    s=sorted([i for i in range(NUM_CLUSTER)])
+                else:
+                    all_sets = PowerSetsBinary([i for i in range(cur_agent_num)])
+                    s=sorted([i for i in range(cur_agent_num)])
+
+                l=permutations(s)
+                all_orders = []
+                for x in l:
+                    all_orders.append(list(x))
+
+        if del_low==True:
+            # Dirty way to print shapley values
+            tmp = agent_shapley_sum[:]
+            for offset, agents in removed_agents[::-1]:
+                t_agents = sorted(agents, key=lambda x: x[0])
+                for i, v in t_agents:
+                    tmp = tmp[:i] + [v] + tmp[i:]
+            print(tmp)
         else:
-            
-            gradient_weight = []
-            gradient_bias = []
-            
-            for k in range(NUM_AGENT):
-                gradient_weight.append(np.subtract(model['weights'], local_models[k][0]))
-                gradient_bias.append(np.subtract(model['bias'], local_models[k][1]))
-            
-            pre_weights = np.array([local_models[local_model_index][0] for local_model_index in range(len(local_models))])
-            pre_bias = np.array([local_models[local_model_index][1] for local_model_index in range(len(local_models))])
-
-            for s in all_sets:
-                group_shapley_value.append(
-                    train_with_gradient_and_valuation(s, gradient_weight, gradient_bias,
-                                                    [model['weights'], model['bias']], data_num))
-                print(str(s) + "\t" + str(group_shapley_value[len(group_shapley_value) - 1]))
-            
-            agent_shapley = []
-            for index in range(NUM_AGENT):
-                shapley = 0.0
-                for order in all_orders:
-                    pos = order.index(index)
-                    pre_list = list(order[:pos])
-                    edge_list = list(order[:pos+1])
-                    pre_list_index = remove_list_indexed(index, pre_list, all_sets)
-                    #print(order, pre_list_index, pre_list, edge_list, group_shapley_value[pre_list_index], group_shapley_value[shapley_list_indexed(edge_list, all_sets)])
-                    if pre_list_index != -1:
-                        shapley += (group_shapley_value[shapley_list_indexed(edge_list, all_sets)] - group_shapley_value[
-                            pre_list_index]) / len(all_orders)
-                agent_shapley.append(shapley)
-
-            for i, ag_s in enumerate(agent_shapley):
-                agent_shapley_sum[i] += ag_s
-                print(ag_s)
-
             print(agent_shapley_sum)
-
-        m_w = np.zeros([784, 10], dtype=np.float32)
-        m_b = np.zeros([10], dtype=np.float32)
-        for local_model_index in range(len(local_models)):
-            m_w = np.add(np.multiply(local_models[local_model_index][0], agents_w[local_model_index]), m_w)
-            m_b = np.add(np.multiply(local_models[local_model_index][1], agents_w[local_model_index]), m_b)
+        
+        m_w = np.zeros([para_num, class_num], dtype=np.float32)
+        m_b = np.zeros([class_num], dtype=np.float32)
+        print(agents_select)
+        for local_model_index in range(cur_agent_num):
+            m_w = np.add(np.multiply(local_models[local_model_index][0], 1/cur_agent_num), m_w)
+            m_b = np.add(np.multiply(local_models[local_model_index][1], 1/cur_agent_num), m_b)
         model = {
                 'weights': m_w,
                 'bias': m_b
@@ -465,7 +450,24 @@ if __name__ == "__main__":
         learning_rate = learning_rate * 0.9
         loss = federated_eval(model, federated_train_data)
         print('round {}, loss={}'.format(round_num, loss))
-        print(time.time() - start_time)
+        end_time = time.time()
+        print("server time:", end_time-start_time)
+
+        if cur_agent_num < 2*NUM_CLUSTER:
+            if group_shapley_value[-1] < group_shapley_value[0]:
+                print("[+] Train finish")
+                break
+            else:
+                del_low = "Finish"    
 
     #print(agent_shapley_sum)
-    print("end_time", time.time() - start_time)
+    print("total_time:", time.time() - total_time)
+
+
+    if del_low == "Finish" or del_low==True:
+        for offset, agents in removed_agents[::-1]:
+            t_agents = sorted(agents, key=lambda x: x[0])
+            for i, v in t_agents:
+                agent_shapley_sum = agent_shapley_sum[:i] + [v] + agent_shapley_sum[i:]
+    
+    print("Final shapley values:", agent_shapley_sum)

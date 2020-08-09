@@ -11,7 +11,7 @@ import os
 
 NUM_EXAMPLES_PER_USER = 1000
 BATCH_SIZE = 100
-NUM_AGENT = 5
+NUM_AGENT = 3
 
 
 def get_data_for_digit(source, digit):
@@ -37,28 +37,50 @@ def get_data_for_digit_test(source, digit):
     return output_sequence
 
 
-def get_data_for_federated_agents(source, num):
+def get_data_for_federated_agents(x, y, num, weight=False, noiseX=False):
+
+    samples_len = len(x)
     output_sequence = []
+    Classes = []
 
-    Samples = []
-    for digit in range(0, 10):
-        samples = [i for i, d in enumerate(source[1]) if d == digit]
-        samples = samples[0:5421]
-        Samples.append(samples)
+    if weight:
+        if len(weight) != NUM_AGENT:
+            raise RuntimeError("Weights not corret")
+        for w in weight:
+            if w <= 0:
+                raise RuntimeError("Weights not corret")
 
-    all_samples = []
-    for sample in Samples:
-        for sample_index in range(int(num * (len(sample) / NUM_AGENT)), int((num + 1) * (len(sample) / NUM_AGENT))):
-            all_samples.append(sample[sample_index])
+        piece_num = int(samples_len/sum(weight))
+        left=sum(weight[:num])
+        right = left+num+1
+    else:
+        piece_num = samples_len/NUM_AGENT
+        left = num
+        right = num+1
 
-    # all_samples = [i for i in range(int(num*(len(source[1])/NUM_AGENT)), int((num+1)*(len(source[1])/NUM_AGENT)))]
+    all_samples = [i for i in range(int(left*piece_num), int(right*piece_num))]
 
     for i in range(0, len(all_samples), BATCH_SIZE):
         batch_samples = all_samples[i:i + BATCH_SIZE]
         output_sequence.append({
-            'x': np.array([source[0][i].flatten() / 255.0 for i in batch_samples],
+            'x': np.array([x[i].flatten() / SCALE for i in batch_samples],
                           dtype=np.float32),
-            'y': np.array([source[1][i] for i in batch_samples], dtype=np.int32)})
+            'y': np.array([y[i] for i in batch_samples], dtype=np.int32)})
+
+    if noiseX:
+        if num >= 1:
+            ratio = 0.3
+            sum_agent = len(all_samples)
+            x_dim =  len(output_sequence[0]['x'][0])
+            noisepart = x_dim/3*num
+            print(noisepart)
+            noise = ratio * np.array([(-1)**k if k <= noisepart else 0 for k in range(x_dim)])
+            
+            for i in range(0, sum_agent):
+                # Deterministic noise
+                output_sequence[int(i/BATCH_SIZE)]['x'][i % BATCH_SIZE] = checkRange(np.add(output_sequence[int(i/BATCH_SIZE)]['x'][i % BATCH_SIZE], noise))
+
+
     return output_sequence
 
 
@@ -79,7 +101,7 @@ def batch_loss(model, batch):
 
 
 @tff.tf_computation(MODEL_TYPE, BATCH_TYPE, tf.float32)
-def batch_train(initial_model, batch, learning_rate):
+def batch_train(initial_model, data, learning_rate):
     # Define a group of model variables and set them to `initial_model`.
     model_vars = tff.utils.create_variables('v', MODEL_TYPE)
     init_model = tff.utils.assign(model_vars, initial_model)
@@ -87,7 +109,7 @@ def batch_train(initial_model, batch, learning_rate):
     # Perform one step of gradient descent using loss from `batch_loss`.
     optimizer = tf.train.GradientDescentOptimizer(learning_rate)
     with tf.control_dependencies([init_model]):
-        train_model = optimizer.minimize(batch_loss(model_vars, batch))
+        train_model = optimizer.minimize(data_loss(model_vars, data))
 
     # Return the model vars after performing this gradient descent step.
     with tf.control_dependencies([train_model]):
@@ -99,12 +121,8 @@ LOCAL_DATA_TYPE = tff.SequenceType(BATCH_TYPE)
 
 @tff.federated_computation(MODEL_TYPE, tf.float32, LOCAL_DATA_TYPE)
 def local_train(initial_model, learning_rate, all_batches):
-    # Mapping function to apply to each batch.
-    @tff.federated_computation(MODEL_TYPE, BATCH_TYPE)
-    def batch_fn(model, batch):
-        return batch_train(model, batch, learning_rate)
-
-    return tff.sequence_reduce(all_batches, initial_model, batch_fn)
+    
+    return batch_train(model, batch, learning_rate)
 
 
 @tff.federated_computation(MODEL_TYPE, LOCAL_DATA_TYPE)
@@ -208,26 +226,21 @@ def PowerSetsBinary(items):
 if __name__ == "__main__":
 
     start_time = time.time()
-    mnist_train, mnist_test = tf.keras.datasets.mnist.load_data()
+    para_num = 28*28
+    class_num = 10
+    SCALE = 255.0
 
-    # data_num = np.asarray([5923, 6742, 5958, 6131, 5842])
-    # agents_weights = np.divide(data_num, data_num.sum())
-    # agents_weights = 0.2032
+    (train_x, train_y), (test_x, test_y) = tf.keras.datasets.mnist.load_data()
+    train_x = np.asarray(train_x.reshape(len(train_x), -1), dtype=np.float32)
+    train_y = np.asarray(train_y, dtype=np.int32)
+    test_x = np.asarray(test_x.reshape(len(test_x), para_num), dtype=np.float32)
+    test_x = np.divide(test_x, SCALE)
+    test_y = np.asarray(test_y, dtype=np.int32)
 
-    DISTRIBUTION_TYPE = "SAME"
+    federated_train_data_divide = [get_data_for_federated_agents(train_x, train_y, d) for d in range(NUM_AGENT)]
 
-    federated_train_data_divide = None
-    test_images = None
-    test_labels_onehot = None
-    if DISTRIBUTION_TYPE == "SAME":
-        federated_train_data_divide = [get_data_for_federated_agents(mnist_train, d) for d in range(NUM_AGENT)]
-        #test_images = readTestImagesFromFile(False)
-        #test_labels_onehot = readTestLabelsFromFile(False)
-        test_images = readTestImagesFromFile(False)
-        test_labels_onehot = readTestLabelsFromFile(False)
-
-    #all_sets = PowerSetsBinary([i for i in range(NUM_AGENT)])
-    all_sets = [[i for i in range(NUM_AGENT)]]
+    all_sets = PowerSetsBinary([i for i in range(NUM_AGENT)])
+    #all_sets = [[i for i in range(NUM_AGENT)]]
     group_shapley_value = []
     for ss in all_sets:
         federated_train_data = []
@@ -275,10 +288,10 @@ if __name__ == "__main__":
             loss = federated_eval(model, federated_train_data)
             print('round {}, loss={}'.format(round_num, loss))'''
 
-        m = np.dot(test_images, np.asarray(model['weights']))
+        m = np.dot(test_x, np.asarray(model['weights']))
         test_result = m + np.asarray(model['bias'])
         y = tf.nn.softmax(test_result)
-        correct_prediction = tf.equal(tf.argmax(y, 1), tf.arg_max(test_labels_onehot, 1))
+        correct_prediction = tf.equal(tf.argmax(y, 1), test_y)
         accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
         group_shapley_value.append(accuracy.numpy())
         print("combination finished ", time.time() - start_time)
